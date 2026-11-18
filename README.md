@@ -86,3 +86,13 @@ GitHub Actions runs Python 3.10, 3.12, and 3.13 unit tests and mock smoke tests 
 On Windows you can double-click run_ollama_windows.bat for a local installation check. It never pulls models automatically. You can run python check_ollama.py and then python batch_run.py --mode ollama --models llama3.2,qwen2.5:7b --rounds 3.
 
 **Important:** Mock mode tests parsing only; it does not rank prompts. Local Ollama performance is exploratory, not evidence of Studio Next victory or of network validator agreement.
+
+
+## Run actual free AI tests without installing Ollama locally
+
+Open [GitHub Actions → Free local-model benchmark](https://github.com/bearbaba/WizardCoinLab/actions/workflows/local-model-benchmark.yml) and select **Run workflow**. The job uses an ephemeral Linux runner to install Ollama, pull small open models, run the local candidates and upload JSON/CSV reports. This is **real model inference, not mock data**, but it is **not** GenLayer network consensus.
+
+- [First self-run benchmark: 2026-11-18](reports/2026-11-18-free-model-benchmark.md)
+- [GitHub Actions execution log](https://github.com/bearbaba/WizardCoinLab/actions/runs/44217927334)
+- The public repo currently has a small free benchmark matrix to avoid unnecessary compute; use GitHub Actions responsibly.
+
