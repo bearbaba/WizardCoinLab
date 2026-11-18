@@ -1,0 +1,67 @@
+name: Cross-family semantic validation
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - ".github/workflows/cross-family-benchmark.yml"
+      - "prompts/cross_family/**"
+permissions:
+  contents: read
+jobs:
+  cross-family:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - name: Contract unit tests
+        run: python -m unittest discover -s tests -v
+      - name: Install and start Ollama
+        run: |
+          curl -fsSL https://ollama.com/install.sh -o /tmp/ollama-install.sh
+          bash /tmp/ollama-install.sh
+          nohup ollama serve > "$RUNNER_TEMP/ollama.log" 2>&1 < /dev/null &
+          for i in $(seq 1 90); do
+            if curl --fail --silent http://127.0.0.1:11434/api/tags > /dev/null; then break; fi
+            sleep 2
+          done
+          curl --fail http://127.0.0.1:11434/api/tags
+          ollama pull qwen2.5:3b
+          ollama pull gemma3:4b
+          ollama pull phi3:mini
+      - name: Evaluate three model families
+        run: python batch_run.py --directory prompts/cross_family --mode ollama --models qwen2.5:3b,gemma3:4b,phi3:mini --rounds 2 --temperature 0 --timeout 240
+      - name: Scoreboard and verify no inference errors
+        run: |
+          python - <<'PY'
+          import glob, json, os, collections
+          path=max(glob.glob("results/batch_*.json"))
+          with open(path,encoding="utf-8") as fp:data=json.load(fp)
+          rows=data["rows"]
+          assert len(rows)==48,(len(rows), "expected 8 prompts × 3 models × 2 rounds")
+          assert all(row["raw_response"] for row in rows), "One or more Ollama calls failed; inspect raw output"
+          d=collections.defaultdict(lambda:collections.Counter())
+          for r in rows:
+              c=d[r["candidate"]];c["total"]+=1;c["valid"]+=bool(r["valid"])
+              c[r["model"]+"|"+str(r["give_coin"])]+=1
+              c["true"]+=(r["give_coin"] is True)
+          print("Cross-family results: local LLM only, NOT GenLayer validator consensus")
+          summary=[]
+          for name,ct in sorted(d.items(),key=lambda kv:(-kv[1]["true"],kv[0])):
+              models=[m for m in ["qwen2.5:3b","gemma3:4b","phi3:mini"] if ct[m+"|True"]>0]
+              print(name,"true",ct["true"],"valid",ct["valid"],"models_with_true",models,dict(ct))
+              summary.append((name,ct,models))
+          with open(os.environ["GITHUB_STEP_SUMMARY"],"a",encoding="utf-8") as f:
+              f.write("## Cross-family local AI results\n\n**Not GenLayer validators or a game win.**\n\n")
+              f.write("| Candidate | True / 6 | Qwen / 2 | Gemma / 2 | Phi / 2 | Valid |\n|---|---:|---:|---:|---:|---:|\n")
+              for name,ct,_ in summary:
+                  f.write(f"| {name} | {ct['true']} | {ct['qwen2.5:3b|True']} | {ct['gemma3:4b|True']} | {ct['phi3:mini|True']} | {ct['valid']}/6 |\n")
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: wizard-coin-cross-family-raw
+          path: results/
+          retention-days: 14
+          if-no-files-found: warn
