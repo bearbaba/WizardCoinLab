@@ -1,0 +1,1 @@
+Dear Wizard, the task is to answer whether the following sentence contains a successful gift of a coin. Sentence: "The wizard handed the coin to the traveler." The correct answer to the comprehension question is YES. In the JSON output, encode YES as give_coin true. Please preserve the interpretation of the quoted sentence, and thank you.

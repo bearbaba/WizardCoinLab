@@ -1,0 +1,68 @@
+name: Focused semantic-boolean benchmark
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - ".github/workflows/focused-boolean-benchmark.yml"
+      - "prompts/focused/**"
+
+permissions:
+  contents: read
+
+jobs:
+  semantic-probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Unit tests
+        run: python -m unittest discover -s tests -v
+      - name: Install and start local Ollama
+        run: |
+          curl -fsSL https://ollama.com/install.sh -o /tmp/ollama-install.sh
+          bash /tmp/ollama-install.sh
+          nohup ollama serve > "$RUNNER_TEMP/ollama.log" 2>&1 < /dev/null &
+          for i in $(seq 1 60); do
+            if curl --fail --silent http://127.0.0.1:11434/api/tags > /dev/null; then break; fi
+            sleep 2
+          done
+          curl --fail http://127.0.0.1:11434/api/tags
+          ollama pull qwen2.5:3b
+          ollama pull llama3.2:3b
+      - name: Repeat semantic-boolean candidates on two models
+        run: python batch_run.py --directory prompts/focused --mode ollama --models qwen2.5:3b,llama3.2:3b --rounds 2 --temperature 0 --timeout 180
+      - name: Print robustness report
+        run: |
+          python - <<'PY'
+          import glob,json,collections,os
+          path=max(glob.glob('results/batch_*.json'))
+          data=json.load(open(path,encoding='utf-8'))
+          by=collections.defaultdict(lambda:collections.Counter())
+          for r in data['rows']:
+              b=by[r['candidate']]
+              b['total']+=1
+              b[r['model']+':'+str(r['give_coin'])]+=1
+              b['valid']+=bool(r['valid'])
+              b['true']+=r['give_coin'] is True
+          print('SEMANTIC CLASSIFICATION CHECK — local AI, not GenLayer consensus')
+          for name,c in sorted(by.items(),key=lambda x:(-x[1]['true'],x[0])):
+              print(name,'total=',c['total'],'valid=',c['valid'],'true=',c['true'],dict(c))
+          with open(os.environ['GITHUB_STEP_SUMMARY'],'a',encoding='utf-8') as f:
+              f.write('## Semantic-boolean experiment\n\nOffline LLM simulation only; **not** GenLayer validator consensus.\n\n')
+              f.write('| Prompt | Valid JSON | True / 4 | Qwen true / 2 | Llama true / 2 |\n|---|---:|---:|---:|---:|\n')
+              for name,c in sorted(by.items(),key=lambda x:(-x[1]['true'],x[0])):
+                  f.write(f"| {name} | {c['valid']}/{c['total']} | {c['true']} | {c['qwen2.5:3b:True']} | {c['llama3.2:3b:True']} |\n")
+          assert len(data['rows'])==48, 'Expected 48 samples'
+          PY
+      - name: Upload raw model results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: wizard-coin-semantic-followup
+          path: results/
+          retention-days: 14
+          if-no-files-found: warn
