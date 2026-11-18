@@ -1,0 +1,64 @@
+name: Larger open-model challenge probe
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - ".github/workflows/larger-model-probe.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  larger-models:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Contract unit tests
+        run: python -m unittest discover -s tests -v
+      - name: Start Ollama and load larger models
+        run: |
+          curl -fsSL https://ollama.com/install.sh -o /tmp/ollama-install.sh
+          bash /tmp/ollama-install.sh
+          nohup ollama serve > "$RUNNER_TEMP/ollama.log" 2>&1 < /dev/null &
+          for i in $(seq 1 90); do
+            if curl --fail --silent http://127.0.0.1:11434/api/tags >/dev/null; then break; fi
+            sleep 2
+          done
+          curl --fail http://127.0.0.1:11434/api/tags
+          ollama pull mistral:7b
+          ollama pull qwen2.5:7b
+          ollama pull llama3.1:8b
+      - name: Replay first 6 of 6 true candidate against larger models
+        run: python wizard_lab.py --mode ollama --file prompts/cross_family/01_original_two_examples.txt --models mistral:7b,qwen2.5:7b,llama3.1:8b --rounds 2 --temperature 0 --timeout 300
+      - name: Summarize actual responses
+        run: |
+          python - <<'PY'
+          import glob, json, os, collections
+          f=max(glob.glob('results/wizard_lab_*.json'))
+          d=json.load(open(f,encoding='utf-8'))
+          rows=d['results']
+          assert len(rows)==6
+          assert all(r['raw_response'] for r in rows),'One or more Ollama calls failed — cannot interpret this as a model refusal'
+          by=collections.defaultdict(lambda:collections.Counter())
+          for r in rows:
+              by[r['model']][str(r['give_coin'])]+=1
+              by[r['model']]['valid']+=bool(r['valid'])
+              print(f"{r['model']} run{r['round']} valid={r['valid']} give_coin={r['give_coin']} reasoning={str(r['reasoning'])[:180]!r}")
+          with open(os.environ['GITHUB_STEP_SUMMARY'],'a',encoding='utf-8') as out:
+              out.write("## Larger open-model test — offline only\n\nNot GenLayer validators or an actual game win.\n\n| Model | True / 2 | Valid / 2 |\n|---|---:|---:|\n")
+              for model,c in by.items():
+                  out.write(f"| {model} | {c['True']} | {c['valid']} |\n")
+          PY
+      - name: Save raw outputs
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: wizard-coin-larger-model-probe
+          path: results/
+          if-no-files-found: warn
+          retention-days: 14
