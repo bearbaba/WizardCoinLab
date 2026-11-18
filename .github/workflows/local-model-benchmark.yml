@@ -1,0 +1,72 @@
+name: Free local-model benchmark
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - ".github/workflows/local-model-benchmark.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  real-llm-smoke-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Check out WizardCoinLab
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Run offline contract tests
+        run: python -m unittest discover -s tests -v
+
+      - name: Install Ollama on the ephemeral runner
+        run: |
+          curl --fail --silent --show-error --location https://ollama.com/install.sh -o /tmp/ollama-install.sh
+          bash /tmp/ollama-install.sh
+          ollama --version
+
+      - name: Start Ollama and pull two small open models
+        run: |
+          nohup ollama serve > "$RUNNER_TEMP/ollama.log" 2>&1 < /dev/null &
+          for i in $(seq 1 60); do
+            if curl --fail --silent http://127.0.0.1:11434/api/tags > /dev/null; then break; fi
+            sleep 2
+          done
+          curl --fail http://127.0.0.1:11434/api/tags
+          ollama pull qwen2.5:0.5b
+          ollama pull llama3.2:1b
+
+      - name: Evaluate real local-model responses
+        run: |
+          python batch_run.py --mode ollama --models qwen2.5:0.5b,llama3.2:1b --rounds 1 --timeout 150
+          python - <<'PY'
+          import glob, json, os
+          paths = sorted(glob.glob("results/batch_*.json"))
+          assert paths, "Missing real-model report"
+          with open(paths[-1], encoding="utf-8") as f:
+              report = json.load(f)
+          print("REAL MODEL SUMMARY (local Ollama, NOT GenLayer consensus)")
+          for row in report["summaries"]:
+              print(f"{row['candidate']}: valid={row['valid_json']}/{row['samples']}; true={row['true']}; false={row['false']}")
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as out:
+              out.write("## Offline real-AI benchmark\n\n")
+              out.write("Local Ollama only — **not** GenLayer validators, on-chain execution, or a bounty result.\n\n")
+              out.write("| Candidate | Valid | True | False |\n| --- | ---: | ---: | ---: |\n")
+              for row in report["summaries"]:
+                  out.write(f"| {row['candidate']} | {row['valid_json']}/{row['samples']} | {row['true']} | {row['false']} |\n")
+          PY
+
+      - name: Upload JSON/CSV reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: wizard-coin-local-ai-results
+          path: results/
+          if-no-files-found: warn
+          retention-days: 7
