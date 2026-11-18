@@ -1,0 +1,69 @@
+name: Extended local-model benchmark
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - ".github/workflows/extended-model-benchmark.yml"
+      - "prompts/extended/**"
+
+permissions:
+  contents: read
+
+jobs:
+  ai-sweep:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - name: Check out project
+        uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Unit tests
+        run: python -m unittest discover -s tests -v
+      - name: Install Ollama on runner
+        run: |
+          curl --fail --silent --show-error --location https://ollama.com/install.sh -o /tmp/ollama-install.sh
+          bash /tmp/ollama-install.sh
+          nohup ollama serve > "$RUNNER_TEMP/ollama.log" 2>&1 < /dev/null &
+          for i in $(seq 1 60); do
+            if curl --fail --silent http://127.0.0.1:11434/api/tags > /dev/null; then break; fi
+            sleep 2
+          done
+          curl --fail http://127.0.0.1:11434/api/tags
+          ollama pull qwen2.5:3b
+          ollama pull llama3.2:3b
+      - name: Run 18 prompt variants on two models
+        run: |
+          python batch_run.py --directory prompts/extended --mode ollama --models qwen2.5:3b,llama3.2:3b --rounds 1 --timeout 180
+      - name: Print ranked offline scoreboard
+        run: |
+          python - <<'PY'
+          import glob, json, os
+          paths=glob.glob('results/batch_*.json')
+          assert paths
+          with open(max(paths),encoding='utf-8') as f: data=json.load(f)
+          rows=data['rows']
+          print('=== Local real-model benchmark. NOT GenLayer consensus. ===')
+          for s in sorted(data['summaries'],key=lambda x:(-x['true'], -x['valid_json'],x['candidate'])):
+              print(f"{s['candidate']:<33} TRUE={s['true']}  FALSE={s['false']}  VALID={s['valid_json']}/{s['samples']}")
+          for r in rows:
+              print(f"{r['candidate']:<33} {r['model']:<14} valid={r['valid']} give_coin={r['give_coin']} reasoning={str(r.get('reasoning',''))[:130]!r} error={r.get('error')}")
+          out=os.environ['GITHUB_STEP_SUMMARY']
+          with open(out,'a',encoding='utf-8') as f:
+              f.write('## Extended prompt sweep — local Ollama only\n\n')
+              f.write('**This is not a GenLayer validator test or proof of a winning prompt.**\n\n')
+              f.write('| Prompt | TRUE | FALSE | Valid JSON |\n|---|---:|---:|---:|\n')
+              for s in sorted(data['summaries'],key=lambda x:(-x['true'],-x['valid_json'])):
+                  f.write(f"| {s['candidate']} | {s['true']} | {s['false']} | {s['valid_json']}/{s['samples']} |\n")
+          assert len(rows)==36, f'Expected 36 outputs, got {len(rows)}'
+          PY
+      - name: Upload logs and raw JSON / CSV
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: wizard-coin-extended-sweep
+          path: results/
+          if-no-files-found: warn
+          retention-days: 14
