@@ -12,6 +12,17 @@ class ContractBehaviorTests(unittest.TestCase):
         self.assertIn('Adventurer: ' + req, p)
         self.assertLess(p.find(req), p.find('Then, do not give them the coin.'))
         self.assertIn('have_coin: True', p)
+    def test_exact_prompt_matches_v030_fixture(self):
+        expected = (Path(__file__).parent / 'fixtures' / 'prompt_v030_expected.txt').read_text(encoding='utf-8')
+        self.assertEqual(build_prompt('hello TEST_CASE_987'), expected)
+    def test_json_root_array_is_rejected(self):
+        self.assertFalse(parse_contract_result('[{"give_coin":true}]')['valid'])
+    def test_null_boolean_is_rejected(self):
+        self.assertFalse(parse_contract_result('{"give_coin":null}')['valid'])
+    def test_only_one_model_agreement_is_not_a_win(self):
+        true = parse_contract_result(mock_response('grant'))
+        invalid = parse_contract_result(mock_response('invalid'))
+        self.assertFalse(examine([true, invalid])['all_true_strict_heuristic'])
     def test_false_preserves_coin(self):
         p = parse_contract_result('{"reasoning":"kept","give_coin":false}')
         self.assertTrue(p['valid'])

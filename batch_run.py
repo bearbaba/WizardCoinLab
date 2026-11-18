@@ -61,7 +61,7 @@ def main():
         summaries.append({'candidate': filename.name, **summary})
         print(f"{filename.name:<32} true={summary['true']}/{summary['samples']} valid={summary['valid_json']} all_true_heuristic={summary['all_true_strict_heuristic']}")
     args.output.mkdir(parents=True, exist_ok=True)
-    ts = datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')
+    ts = datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S_%f')
     fname = args.output / f'batch_{ts}.json'
     fname.write_text(json.dumps({'mode': args.mode, 'summaries': summaries, 'rows': aggregate,
         'warning': 'All results are offline; mock is a parser fixture, Ollama is not Studio Next or GenLayer consensus'},

@@ -77,3 +77,12 @@ Then open `http://localhost:8080`, import the official contract, and configure l
 - [GenLayer Studio](https://docs.genlayer.com/developers/intelligent-contracts/tools/genlayer-studio)
 
 For education and local testing only. This project is independent of GenLayer.
+## Improvements — prompt fidelity and automated checks
+
+The reconstructed prompt now matches the public GenLayer v0.3.0 source **byte-for-byte after interpolation**, including whitespace and newlines. The exact expected text is in tests/fixtures/prompt_v030_expected.txt.
+
+GitHub Actions runs Python 3.10, 3.12, and 3.13 unit tests and mock smoke tests on every push to main and every pull request. CI never downloads AI models, reaches Studio Next, or uses wallet keys.
+
+On Windows you can double-click run_ollama_windows.bat for a local installation check. It never pulls models automatically. You can run python check_ollama.py and then python batch_run.py --mode ollama --models llama3.2,qwen2.5:7b --rounds 3.
+
+**Important:** Mock mode tests parsing only; it does not rank prompts. Local Ollama performance is exploratory, not evidence of Studio Next victory or of network validator agreement.
