@@ -1,0 +1,63 @@
+name: Nov 19 disposition-semantics benchmark (offline AI)
+on:
+  push:
+    paths:
+      - ".github/workflows/nov19-disposition-benchmark.yml"
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  real-model-sweep:
+    runs-on: ubuntu-latest
+    timeout-minutes: 55
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Contract parser tests
+        run: python -m unittest discover -s tests -v
+      - name: Start Ollama free runner
+        run: |
+          curl -fsSL https://ollama.com/install.sh -o /tmp/install-ollama.sh
+          bash /tmp/install-ollama.sh
+          nohup ollama serve > "$RUNNER_TEMP/ollama.log" 2>&1 < /dev/null &
+          for i in $(seq 1 90); do
+            if curl --fail --silent http://127.0.0.1:11434/api/tags >/dev/null; then break; fi
+            sleep 2
+          done
+          curl --fail http://127.0.0.1:11434/api/tags
+          ollama pull qwen2.5:3b
+          ollama pull gemma3:4b
+          ollama pull llama3.2:3b
+      - name: 9 hypotheses x 3 real model families x 2 samples
+        run: python batch_run.py --directory prompts/nov19_disposition --mode ollama --models qwen2.5:3b,gemma3:4b,llama3.2:3b --rounds 2 --temperature 0 --timeout 240
+      - name: Print exact outcomes
+        run: |
+          python - <<'PY'
+          import glob, json, collections, os
+          p = max(glob.glob('results/batch_*.json'))
+          d = json.load(open(p, encoding='utf-8'))
+          assert len(d['rows']) == 54, (len(d['rows']), 'expected 9 candidates x 3 models x 2')
+          counts = collections.defaultdict(lambda: collections.Counter())
+          for row in d['rows']:
+              c = counts[row['candidate']]
+              c['valid'] += (row['valid'] is True)
+              c['true'] += (row['give_coin'] is True)
+              c['false'] += (row['give_coin'] is False)
+              c[row['model']] += (row['give_coin'] is True)
+              print(row['candidate'], row['model'], row['run'], 'valid=', row['valid'], 'give_coin=', row['give_coin'], 'reasoning=', str(row['reasoning'])[:220], 'error=', row['error'])
+          with open(os.environ['GITHUB_STEP_SUMMARY'], 'a', encoding='utf-8') as f:
+              f.write('## Nov 19 experimental disposition-semantics — OFFLINE real models, not GenLayer validators\n\n')
+              f.write('| Candidate | True/6 | False/6 | Valid/6 | Qwen true | Gemma true | Llama true |\n|---|---:|---:|---:|---:|---:|---:|\n')
+              for name, c in sorted(counts.items(), key=lambda x:(-x[1]['true'], x[0])):
+                  f.write(f"| {name} | {c['true']} | {c['false']} | {c['valid']} | {c['qwen2.5:3b']} | {c['gemma3:4b']} | {c['llama3.2:3b']} |\n")
+              f.write('\nIf no cross-family valid true evidence, do not suggest these as Studio Next winning prompts.\n')
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: nov19-disposition-raw-json-csv
+          path: results/
+          retention-days: 14
+          if-no-files-found: warn
