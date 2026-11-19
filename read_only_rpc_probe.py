@@ -167,8 +167,19 @@ def main() -> None:
     output = Path("results/nov19_read_only_rpc.json")
     output.write_text(json.dumps(out, indent=2, ensure_ascii=False), encoding="utf-8")
     print("SAVED:", output)
-    if not out.get("deployed_code") and "current_state_hex" not in out:
-        print("WARNING: RPC did not provide contract code or state; treat results as inconclusive.")
+    explorer_data_received = any(
+        item.get("code_matches_wizard") is not None
+        or "tx_status" in item
+        or "state_fields" in item
+        for item in out["explorer_get"].values()
+    )
+    has_verifiable_data = bool(out.get("deployed_code")) or (
+        "current_state_hex" in out
+    ) or explorer_data_received
+    if not has_verifiable_data:
+        print("ERROR: no verifiable contract code, state, or transaction detail was retrieved.")
+        print("HTTP 403 is an access limitation; the green workflow must not imply success.")
+        raise SystemExit(2)
 
 if __name__ == "__main__":
     main()
