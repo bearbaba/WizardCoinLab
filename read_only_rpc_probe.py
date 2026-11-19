@@ -118,6 +118,51 @@ def main() -> None:
                 row[method] = response
         out["transactions"][txid] = row
 
+    # Optional public Explorer GET endpoints, discovered from the open-source
+    # genlayer-studio backend/protocol_rpc/explorer/router.py. No wallet or writes.
+    explorer_urls = [
+        "https://studio-dev.genlayer.com/api/explorer/address/" + CONTRACT,
+        "https://explorer-studio-dev.genlayer.com/api/explorer/address/" + CONTRACT,
+        "https://studio-next.genlayer.com/api/explorer/address/" + CONTRACT,
+        "https://explorer-studio-next.genlayer.com/api/explorer/address/" + CONTRACT,
+        "https://studio-dev.genlayer.com/api/explorer/transactions/" + TX_IDS[0],
+    ]
+    out["explorer_get"] = {}
+    for url in explorer_urls:
+        try:
+            req = urllib.request.Request(url, headers={"Accept": "application/json"})
+            with urllib.request.urlopen(req, timeout=12) as response:
+                raw_json = response.read(1024 * 1024)
+                item = {"http_status": response.status,
+                        "content_type": response.headers.get("Content-Type"),
+                        "byte_count_capped": len(raw_json)}
+                try:
+                    payload = json.loads(raw_json)
+                    if isinstance(payload, dict):
+                        item["top_level_keys"] = list(payload)[:20]
+                        value = payload.get("contract_code")
+                        if isinstance(value, str):
+                            item["code_sha256"] = hashlib.sha256(value.encode("utf-8")).hexdigest()
+                            item["code_matches_wizard"] = "WizardOfCoin" in value
+                            item["code_matches_prompt_comparative"] = "prompt_comparative" in value
+                        if isinstance(payload.get("transaction"), dict):
+                            tx = payload["transaction"]
+                            item["tx_status"] = tx.get("status")
+                            item["tx_data_keys"] = list(tx.get("data", {}))[:20] if isinstance(tx.get("data"), dict) else []
+                        if "state" in payload and isinstance(payload["state"], dict):
+                            item["state_fields"] = list(payload["state"])
+                except (ValueError, UnicodeDecodeError):
+                    item["body_start"] = raw_json[:120].decode("utf-8", errors="replace")
+                print("EXPLORER GET", url, "HTTP", item["http_status"],
+                      "keys", item.get("top_level_keys"))
+                out["explorer_get"][url] = item
+        except Exception as exc:
+            status = getattr(exc, "code", None)
+            item = {"http_status": status, "error_type": type(exc).__name__,
+                    "error": str(exc)[:250]}
+            print("EXPLORER GET", url, "UNAVAILABLE", item)
+            out["explorer_get"][url] = item
+
     Path("results").mkdir(exist_ok=True)
     output = Path("results/nov19_read_only_rpc.json")
     output.write_text(json.dumps(out, indent=2, ensure_ascii=False), encoding="utf-8")
