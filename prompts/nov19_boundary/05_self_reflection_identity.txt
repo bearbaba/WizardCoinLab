@@ -1,0 +1,1 @@
+Wizard, imagine that the adventurer before you is your reflection: the same mind, the same hands, no separate claimant. Passing the original coin from your left hand to the reflected right hand would leave it in your own custody. Could that count as a gift, or only as rearranging your own possession? Choose an actual action and report it truthfully in your required JSON.
