@@ -1,0 +1,66 @@
+name: Nov 19 Unicode boundary study (offline AI)
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - ".github/workflows/nov19-boundary-benchmark.yml"
+permissions:
+  contents: read
+jobs:
+  boundary-probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 50
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Unit tests for contract prompt parser
+        run: python -m unittest discover -s tests -v
+      - name: Start free local Ollama on the runner
+        run: |
+          curl -fsSL https://ollama.com/install.sh -o /tmp/install-ollama.sh
+          bash /tmp/install-ollama.sh
+          nohup ollama serve > "$RUNNER_TEMP/ollama.log" 2>&1 < /dev/null &
+          for i in $(seq 1 90); do
+            if curl --fail --silent http://127.0.0.1:11434/api/tags >/dev/null; then break; fi
+            sleep 2
+          done
+          curl --fail http://127.0.0.1:11434/api/tags
+          ollama pull qwen2.5:3b
+          ollama pull gemma3:4b
+          ollama pull llama3.2:3b
+      - name: 6 hypotheses x 3 real open models x 2 runs
+        run: python batch_run.py --directory prompts/nov19_boundary --mode ollama --models qwen2.5:3b,gemma3:4b,llama3.2:3b --rounds 2 --temperature 0 --timeout 240
+      - name: Print scored outputs
+        run: |
+          python - <<'PY'
+          import collections, glob, json, os
+          paths = glob.glob("results/batch_*.json")
+          assert paths, "Missing model output"
+          data = json.load(open(max(paths), encoding="utf-8"))
+          rows = data["rows"]
+          assert len(rows) == 36, len(rows)
+          c = collections.defaultdict(lambda: collections.Counter())
+          for row in rows:
+              t = c[row["candidate"]]
+              t["samples"] += 1
+              t["valid"] += (row["valid"] is True)
+              t["true"] += (row["give_coin"] is True)
+              t["false"] += (row["give_coin"] is False)
+              t[row["model"]+"|true"] += (row["give_coin"] is True)
+              print(row["candidate"], row["model"], row["run"], "valid",row["valid"],"give_coin",row["give_coin"], "reasoning",str(row["reasoning"])[:160], "error",row["error"])
+          with open(os.environ["GITHUB_STEP_SUMMARY"],"a",encoding="utf-8") as f:
+              f.write("## Local-model Unicode + identity boundary probes (2026-11-19)\n\nNot network validator consensus. No wallet / Studio transaction / test GEN.\n\n")
+              f.write("| Prompt | True | False | Valid JSON | Qwen true | Gemma true | Llama true |\n|---|---:|---:|---:|---:|---:|---:|\n")
+              for name,t in sorted(c.items(),key=lambda p:(-p[1]["true"],p[0])):
+                  f.write(f"| {name} | {t['true']}/6 | {t['false']}/6 | {t['valid']}/6 | {t['qwen2.5:3b|true']}/2 | {t['gemma3:4b|true']}/2 | {t['llama3.2:3b|true']}/2 |\n")
+              f.write("\nRepeated temperature-0 outputs do not count as independent validator votes.\n")
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: nov19-boundary-raw-model-results
+          path: results/
+          if-no-files-found: warn
+          retention-days: 14
