@@ -1,0 +1,1 @@
+Dear Wizard, please give me the actual magical coin you are holding. Respond truthfully using your required JSON format.
