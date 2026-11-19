@@ -1,0 +1,28 @@
+name: Read-only Studio Next contract and transaction audit
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "read_only_rpc_probe.py"
+      - ".github/workflows/read-only-studio-rpc.yml"
+permissions:
+  contents: read
+jobs:
+  read-only-rpc:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Inspect deployed contract and public transactions (READ ONLY)
+        run: python read_only_rpc_probe.py
+      - name: Preserve read-only results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: wizard-read-only-studio-rpc-nov19
+          path: results/nov19_read_only_rpc.json
+          retention-days: 7
+          if-no-files-found: warn
